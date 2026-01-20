@@ -1,5 +1,6 @@
 import * as Cesium from 'cesium'
 import { createTargetingCone } from './cesium/drawCone.js'
+import * as turf from '@turf/turf'
 
 // 1. 定义核心参数
 const centerLon = 116.4; // 地面圆形区域中心经度
@@ -17,6 +18,51 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntity, opti
   } = options;
 
   let lastFootprintPos = null;
+  let accumulatedGeoJSON = null; // 累积的 GeoJSON 区域
+
+  // 创建一个专门用于显示累积区域的实体
+  const footprintEntity = viewer.entities.add({
+    name: "FootprintTotal",
+    polygon: {
+      hierarchy: new Cesium.CallbackProperty(() => {
+        // 如果有累积区域，将其转换为 Cesium Hierarchy 返回
+        if (accumulatedGeoJSON) {
+          // 处理 MultiPolygon 和 Polygon
+          let positions = [];
+
+          if (accumulatedGeoJSON.geometry.type === 'Polygon') {
+            const coords = accumulatedGeoJSON.geometry.coordinates[0];
+            positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
+          } else if (accumulatedGeoJSON.geometry.type === 'MultiPolygon') {
+            // 如果产生 MultiPolygon（分离区域），取面积最大的多边形以保证显示主体
+            // 这是一个折衷方案，因为 Cesium 单个实体不支持 MultiPolygon
+            let maxArea = -1;
+            let maxCoords = null;
+
+            const polygons = accumulatedGeoJSON.geometry.coordinates;
+            polygons.forEach(polyCoords => {
+              const polyFeature = turf.polygon(polyCoords);
+              const area = turf.area(polyFeature);
+              if (area > maxArea) {
+                maxArea = area;
+                maxCoords = polyCoords[0]; // 取外环
+              }
+            });
+
+            if (maxCoords) {
+              positions = maxCoords.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
+            }
+          }
+
+          return new Cesium.PolygonHierarchy(positions);
+        }
+        return new Cesium.PolygonHierarchy([]);
+      }, false),
+      material: Cesium.Color.YELLOW.withAlpha(0.6), // 调整为与高亮区域一致的透明度
+      zIndex: 1, // 确保在地面圆之上
+      classificationType: Cesium.ClassificationType.BOTH
+    }
+  });
 
   return viewer.entities.add({
     name: "Highlight",
@@ -118,17 +164,36 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntity, opti
             0
           );
 
-          // 记录扫过的区域（Footprint）
+          // 更新累积区域（Footprint）
           // 只有当位置移动超过一定距离时才记录，避免过于密集
           if (!lastFootprintPos || Cesium.Cartesian3.distance(center, lastFootprintPos) > 100) {
-            viewer.entities.add({
-              name: "Footprint",
-              polygon: {
-                hierarchy: new Cesium.PolygonHierarchy(intersectionPoints.map(p => Cesium.Cartesian3.clone(p))),
-                material: Cesium.Color.YELLOW.withAlpha(0.15),
-                outline: false
-              }
+
+            // 1. 将当前 intersectionPoints 转换为 GeoJSON Polygon
+            // 注意：Turf 需要首尾闭合
+            const coordinates = intersectionPoints.map(p => {
+              const c = Cesium.Cartographic.fromCartesian(p);
+              return [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude)];
             });
+            // 闭合
+            if (coordinates.length > 0) {
+              coordinates.push(coordinates[0]);
+
+              const currentPoly = turf.polygon([coordinates]);
+
+              // 2. 合并
+              if (!accumulatedGeoJSON) {
+                accumulatedGeoJSON = currentPoly;
+              } else {
+                try {
+                  accumulatedGeoJSON = turf.union(turf.featureCollection([accumulatedGeoJSON, currentPoly]));
+                  // 简化以提高性能
+                  accumulatedGeoJSON = turf.simplify(accumulatedGeoJSON, { tolerance: 0.0001, highQuality: false });
+                } catch (e) {
+                  console.error("Turf union failed:", e);
+                }
+              }
+            }
+
             lastFootprintPos = center;
           }
 
@@ -139,11 +204,14 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntity, opti
         return new Cesium.PolygonHierarchy(intersectionPoints);
       }, false),
       material: Cesium.Color.YELLOW.withAlpha(0.6),
+      zIndex: 2,
+      classificationType: Cesium.ClassificationType.BOTH
     },
   });
 }
 
-export function castToCartesian3(viewer) {
+
+export function castToCartesian3(viewer, enableAnimation = false) {
   // 2. 创建地面圆形区域
   const groundCircle = viewer.entities.add({
     name: "GroundCircle",
@@ -158,18 +226,57 @@ export function castToCartesian3(viewer) {
   });
 
   // 3. 创建可移动的圆锥实体
+  const positionProperty = setupConeAnimation(viewer, centerLon, centerLat, enableAnimation);
+
+  const coneEntity = createTargetingCone(viewer, {
+    name: "Cone",
+    position: positionProperty,
+    targetPosition: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 0),
+    length: coneHeight,
+    coneAngle: 22,
+    modelUrl: "/src/assets/models/uav.glb",
+    color: Cesium.Color.RED.withAlpha(0.4)
+  });
+
+  // 4. 计算圆锥底面与地面圆形的交集，生成高亮区域
+  const highlightPolygon = createIntersectionPolygon(viewer, groundCircle, coneEntity, {
+    scanPositions: scanPositions,
+    coneBottomRadius: coneBottomRadius,
+    groundCircleRadius: circleRadius
+  });
+
+  // 6. 视角聚焦
+  viewer.zoomTo(groundCircle);
+}
+
+/**
+ * 配置圆锥动画
+ * @param {Cesium.Viewer} viewer 
+ * @param {number} centerLon 中心经度
+ * @param {number} centerLat 中心纬度
+ * @param {boolean} enable 是否启用动画
+ * @returns {Cesium.Property} 位置属性
+ */
+function setupConeAnimation(viewer, centerLon, centerLat, enable) {
+  const height = 4000;
+
+  // 如果不启用动画，返回起始位置的固定坐标
+  if (!enable) {
+    return Cesium.Cartesian3.fromDegrees(centerLon - 0.05, centerLat - 0.05, height);
+  }
+
   // 定义移动路径坐标列表（每隔一秒变换位置）
   const waypoints = [
-    { lon: centerLon - 0.05, lat: centerLat - 0.05, height: 4000 },
-    { lon: centerLon - 0.03, lat: centerLat - 0.03, height: 4000 },
-    { lon: centerLon - 0.01, lat: centerLat - 0.01, height: 4000 },
-    { lon: centerLon + 0.01, lat: centerLat + 0.01, height: 4000 },
-    { lon: centerLon + 0.03, lat: centerLat + 0.03, height: 4000 },
-    { lon: centerLon + 0.05, lat: centerLat + 0.05, height: 4000 },
-    { lon: centerLon + 0.05, lat: centerLat + 0.02, height: 4000 },
-    { lon: centerLon + 0.03, lat: centerLat, height: 4000 },
-    { lon: centerLon + 0.01, lat: centerLat - 0.02, height: 4000 },
-    { lon: centerLon - 0.02, lat: centerLat - 0.04, height: 4000 },
+    { lon: centerLon - 0.05, lat: centerLat - 0.05, height: height },
+    { lon: centerLon - 0.03, lat: centerLat - 0.03, height: height },
+    { lon: centerLon - 0.01, lat: centerLat - 0.01, height: height },
+    { lon: centerLon + 0.01, lat: centerLat + 0.01, height: height },
+    { lon: centerLon + 0.03, lat: centerLat + 0.03, height: height },
+    { lon: centerLon + 0.05, lat: centerLat + 0.05, height: height },
+    { lon: centerLon + 0.05, lat: centerLat + 0.02, height: height },
+    { lon: centerLon + 0.03, lat: centerLat, height: height },
+    { lon: centerLon + 0.01, lat: centerLat - 0.02, height: height },
+    { lon: centerLon - 0.02, lat: centerLat - 0.04, height: height },
   ];
 
   const positionProperty = new Cesium.SampledPositionProperty();
@@ -190,33 +297,5 @@ export function castToCartesian3(viewer) {
   viewer.clock.multiplier = 1;
   viewer.clock.shouldAnimate = true;
 
-  const coneEntity = createTargetingCone(viewer, {
-    name: "Cone",
-    position: positionProperty,
-    targetPosition: Cesium.Cartesian3.fromDegrees(centerLon, centerLat, 0),
-    length: coneHeight,
-    coneAngle: 22,
-    modelUrl: "/src/assets/models/uav.glb",
-    color: Cesium.Color.RED.withAlpha(0.4)
-  });
-
-  // 4. 计算圆锥底面与地面圆形的交集，生成高亮区域
-  const highlightPolygon = createIntersectionPolygon(viewer, groundCircle, coneEntity, {
-    scanPositions: scanPositions,
-    coneBottomRadius: coneBottomRadius,
-    groundCircleRadius: circleRadius
-  });
-
-  // 5. 创建扫过的轨迹线
-  // const scanTrajectory = viewer.entities.add({
-  //   name: "Trajectory",
-  //   polyline: {
-  //     positions: new Cesium.CallbackProperty(() => scanPositions, false),
-  //     width: 5,
-  //     material: Cesium.Color.YELLOW,
-  //   },
-  // });
-
-  // 6. 视角聚焦
-  viewer.zoomTo(groundCircle);
+  return positionProperty;
 }

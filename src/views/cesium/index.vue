@@ -14,7 +14,7 @@ const viewer = ref(null);
 
 onMounted(() => {
   viewer.value = cesiumInit(cesiumRef.value);
-  castToCartesian3(viewer.value);
+  castToCartesian3(viewer.value, false);
 });
 </script>
 
