@@ -7,7 +7,6 @@ const centerLon = 116.4; // 地面圆形区域中心经度
 const centerLat = 39.9;  // 地面圆形区域中心纬度
 const circleRadius = 15000; // 地面圆形区域半径(米)
 const coneHeight = 50000; // 圆锥高度(米)
-const coneBottomRadius = 3000; // 圆锥底部半径(米)
 let scanPositions = []; // 存储轨迹边界点
 
 export function createIntersectionPolygon(viewer, groundEntity, coneEntity, options = {}) {
@@ -241,7 +240,7 @@ export function castToCartesian3(viewer, enableAnimation = false) {
   // 4. 计算圆锥底面与地面圆形的交集，生成高亮区域
   const highlightPolygon = createIntersectionPolygon(viewer, groundCircle, coneEntity, {
     scanPositions: scanPositions,
-    coneBottomRadius: coneBottomRadius,
+    coneAngle: 22,
     groundCircleRadius: circleRadius
   });
 
