@@ -6,7 +6,7 @@
 
 <script setup>
 import { ref, onMounted, useTemplateRef } from "vue";
-import { cesiumInit } from "@/utils/cesium.js";
+import { cesiumInit } from "@/utils/cesium/cesiumInit.js";
 import { castToCartesian3 } from "@/utils/cast.js";
 
 const cesiumRef = useTemplateRef("cesiumContainer");
