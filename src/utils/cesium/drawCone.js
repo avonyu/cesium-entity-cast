@@ -1,5 +1,19 @@
 import * as Cesium from 'cesium'
 
+/**
+ * 创建一个指向地面上目标点的圆锥模型
+ * @param {Cesium.Viewer} viewer 
+ * @param {Object} options 
+ * @param {Cesium.Cartesian3} options.position 圆锥底面中心位置
+ * @param {Number} options.length 圆锥长度
+ * @param {Number} options.coneAngle 圆锥角度（弧度）
+ * @param {Cesium.Quaternion} options.orientation 圆锥方向四元数
+ * @param {Cesium.Cartesian3} options.targetPosition 地面上的目标点
+ * @param {String} options.modelUrl 模型路径
+ * @param {Cesium.Color} options.color 圆锥颜色
+ * @param {String} options.name 圆锥名称
+ * @returns {Cesium.Entity} 圆锥实体
+ */
 export function createTargetingCone(viewer, options) {
   const {
     position,
@@ -66,8 +80,8 @@ export function createTargetingCone(viewer, options) {
   // 如果提供了 targetPosition，则计算朝向
   if (targetPosition && !orientation) {
     // 检查 position 是否为动态属性 (具有 getValue 方法)
-    const isDynamic = (position && typeof position.getValue === 'function') || 
-                      (targetPosition && typeof targetPosition.getValue === 'function');
+    const isDynamic = (position && typeof position.getValue === 'function') ||
+      (targetPosition && typeof targetPosition.getValue === 'function');
 
     if (isDynamic) {
       finalOrientation = new Cesium.CallbackProperty((time) => {
