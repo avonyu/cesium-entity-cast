@@ -8,6 +8,44 @@ const coneHeight = 3000; // 圆锥高度(米)
 const coneBottomRadius = 3000; // 圆锥底部半径(米)
 let scanPositions = []; // 存储轨迹边界点
 
+export function createCone(viewer, options) {
+  const {
+    position,
+    length = 3000,
+    coneAngle,
+    orientation,
+    color = Cesium.Color.RED.withAlpha(0.4),
+    name = "Cone",
+  } = options;
+
+  let { bottomRadius } = options;
+
+  if (bottomRadius === undefined && coneAngle !== undefined) {
+    bottomRadius = Math.tan(Cesium.Math.toRadians(coneAngle) / 2) * length;
+  }
+
+  // 如果都没有提供，给一个默认值
+  if (bottomRadius === undefined) {
+    bottomRadius = length / 3;
+  }
+
+  const entity = viewer.entities.add({
+    name: name,
+    position: position,
+    orientation: orientation,
+    cylinder: {
+      length: length,
+      topRadius: 0,
+      bottomRadius: bottomRadius,
+      material: color,
+      outline: true,
+      outlineColor: color.withAlpha(1.0),
+    },
+  });
+
+  return entity;
+}
+
 export function castToCartesian3(viewer) {
   // 2. 创建地面圆形区域
   const groundCircle = viewer.entities.add({
@@ -23,27 +61,28 @@ export function castToCartesian3(viewer) {
   });
 
   // 3. 创建可移动的圆锥实体
-  const coneEntity = viewer.entities.add({
+  const getConePosition = (time) => {
+    const seconds = time.secondsOfDay;
+    const angle = Cesium.Math.toRadians(seconds * 0.5);
+    return Cesium.Cartesian3.fromDegrees(
+      centerLon + Math.cos(angle) * 0.02,
+      centerLat + Math.sin(angle) * 0.02,
+      1000
+    );
+  };
+
+  const coneEntity = createCone(viewer, {
     name: "Cone",
-    position: new Cesium.CallbackProperty(() => {
-      // 圆锥随时间绕地面圆心旋转
-      const time = viewer.clock.currentTime.secondsOfDay;
-      const angle = Cesium.Math.toRadians(time * 0.1);
-      const offset = Cesium.Cartesian3.fromDegrees(
-        centerLon + Math.cos(angle) * 0.02,
-        centerLat + Math.sin(angle) * 0.02,
-        coneHeight
-      );
-      return offset;
+    position: new Cesium.CallbackProperty((time) => getConePosition(time), false),
+    orientation: new Cesium.CallbackProperty((time) => {
+      const position = getConePosition(time);
+      // 设置倾斜角度，这里设置为 Pitch 轴旋转 30 度
+      const hpr = new Cesium.HeadingPitchRoll(0, Cesium.Math.toRadians(30), 0);
+      return Cesium.Transforms.headingPitchRollQuaternion(position, hpr);
     }, false),
-    cylinder: {
-      length: coneHeight,
-      topRadius: 0, // 顶部半径为0 即为圆锥
-      bottomRadius: coneBottomRadius,
-      material: Cesium.Color.RED.withAlpha(0.4),
-      outline: true,
-      outlineColor: Cesium.Color.RED,
-    },
+    length: coneHeight,
+    bottomRadius: coneBottomRadius,
+    color: Cesium.Color.RED.withAlpha(0.4)
   });
 
   // 4. 计算圆锥底面与地面圆形的交集，生成高亮区域
