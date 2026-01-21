@@ -6,15 +6,15 @@
 
 <script setup>
 import { ref, onMounted, useTemplateRef } from "vue";
-import { cesiumInit } from "@/utils/cesium/cesiumInit.js";
-import { castToCartesian3 } from "@/utils/cast.js";
+import { cesiumInit } from "@/lib/cesium/cesiumInit.js";
+import { castToCartesian3 } from "./hooks/initEntities.js";
 
 const cesiumRef = useTemplateRef("cesiumContainer");
 const viewer = ref(null);
 
 onMounted(() => {
   viewer.value = cesiumInit(cesiumRef.value);
-  castToCartesian3(viewer.value, false);
+  castToCartesian3(viewer.value, true);
 });
 </script>
 

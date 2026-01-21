@@ -1,5 +1,10 @@
 import * as Cesium from 'cesium'
 
+/**
+ * 初始化 Cesium 查看器
+ * @param {HTMLElement} cesiumRef - Cesium 容器 DOM 元素
+ * @returns {Cesium.Viewer} - Cesium 查看器实例
+ */
 export function cesiumInit(cesiumRef) {
   // 配置 Cesium Ion 访问令牌
   Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_TOKEN;

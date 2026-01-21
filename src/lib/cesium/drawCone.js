@@ -29,6 +29,7 @@ export function createTargetingCone(viewer, options) {
   let { bottomRadius } = options;
   let finalOrientation = orientation;
 
+  // 如果未提供 bottomRadius，根据 coneAngle 计算
   if (bottomRadius === undefined && coneAngle !== undefined) {
     bottomRadius = Math.tan(Cesium.Math.toRadians(coneAngle) / 2) * length;
   }
@@ -77,8 +78,8 @@ export function createTargetingCone(viewer, options) {
     return Cesium.Quaternion.fromRotationMatrix(rotationMatrix);
   };
 
-  // 如果提供了 targetPosition，则计算朝向
-  if (targetPosition && !orientation) {
+  // 如果提供了 targetPosition，则计算朝向 (targetPosition 优先级高于 orientation)
+  if (targetPosition) {
     // 检查 position 是否为动态属性 (具有 getValue 方法)
     const isDynamic = (position && typeof position.getValue === 'function') ||
       (targetPosition && typeof targetPosition.getValue === 'function');
