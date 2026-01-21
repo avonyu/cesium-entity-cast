@@ -4,12 +4,11 @@ import * as Cesium from 'cesium'
  * 创建一个指向地面上目标点的圆锥模型
  * @param {Cesium.Viewer} viewer 
  * @param {Object} options 
- * @param {Cesium.Cartesian3} options.position 圆锥底面中心位置
+ * @param {Cesium.Cartesian3} options.position 圆锥顶点位置 (尖端)
  * @param {Number} options.length 圆锥长度
  * @param {Number} options.coneAngle 圆锥角度（弧度）
  * @param {Cesium.Quaternion} options.orientation 圆锥方向四元数
  * @param {Cesium.Cartesian3} options.targetPosition 地面上的目标点
- * @param {String} options.modelUrl 模型路径
  * @param {Cesium.Color} options.color 圆锥颜色
  * @param {String} options.name 圆锥名称
  * @returns {Cesium.Entity} 圆锥实体
@@ -21,7 +20,6 @@ export function createTargetingCone(viewer, options) {
     coneAngle,
     orientation,
     targetPosition = null, // 新增参数：地面上的目标点
-    modelUrl, // 新增参数：模型路径
     color = Cesium.Color.RED.withAlpha(0.4),
     name = "Cone",
   } = options;
@@ -96,9 +94,38 @@ export function createTargetingCone(viewer, options) {
     }
   }
 
+  // 计算中心点位置 (将 position 视为顶点/尖端)
+  const calculateCenterPosition = (vertexPos, orientationQuat) => {
+    if (!vertexPos || !orientationQuat) return vertexPos;
+    // 偏移量：从中心点到顶点的向量 (局部坐标系 Z 轴正方向 length/2)
+    // 因为 Cylinder topRadius=0, bottomRadius>0, 且 Z 轴指向 Tip
+    // 所以 Tip 在局部 (0, 0, length/2)
+    // 我们需要将 entity position (中心) 向后移动，使得 Tip 位于 vertexPos
+    const offset = new Cesium.Cartesian3(0, 0, length / 2);
+    const matrix = Cesium.Matrix3.fromQuaternion(orientationQuat, new Cesium.Matrix3());
+    const rotatedOffset = Cesium.Matrix3.multiplyByVector(matrix, offset, new Cesium.Cartesian3());
+    return Cesium.Cartesian3.subtract(vertexPos, rotatedOffset, new Cesium.Cartesian3());
+  };
+
+  let finalPosition = position;
+
+  // 检查是否需要动态计算位置
+  const isPositionDynamic = (position && typeof position.getValue === 'function');
+  const isOrientationDynamic = (finalOrientation && typeof finalOrientation.getValue === 'function');
+
+  if (isPositionDynamic || isOrientationDynamic) {
+    finalPosition = new Cesium.CallbackProperty((time) => {
+      const currentVertex = isPositionDynamic ? position.getValue(time) : position;
+      const currentOrientation = isOrientationDynamic ? finalOrientation.getValue(time) : finalOrientation;
+      return calculateCenterPosition(currentVertex, currentOrientation);
+    }, false);
+  } else {
+    finalPosition = calculateCenterPosition(position, finalOrientation);
+  }
+
   const entity = viewer.entities.add({
     name: name,
-    position: position, // 这里还是使用中心点位置，如果需要“顶点位置”，需要外部传入偏移后的中心点
+    position: finalPosition,
     orientation: finalOrientation,
     cylinder: {
       length: length,
@@ -110,19 +137,8 @@ export function createTargetingCone(viewer, options) {
     },
   });
 
-  // 如果提供了模型路径，则在圆锥位置创建模型
-  if (modelUrl) {
-    viewer.entities.add({
-      name: name + "-Model",
-      position: position,
-      orientation: finalOrientation, // 模型使用相同的朝向
-      model: {
-        uri: modelUrl,
-        minimumPixelSize: 64,
-        maximumScale: 20000,
-      },
-    });
-  }
+  // 保存原始顶点位置属性，方便其他计算使用（如交集计算）
+  entity.vertexPosition = position;
 
   return entity;
 }

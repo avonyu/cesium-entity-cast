@@ -24,51 +24,58 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntitiesInpu
   } = options;
 
   let accumulatedGeoJSON = null; // 累积的 GeoJSON 区域 (所有圆锥共享)
+  const footprintEntityPool = []; // 实体池
 
-  // 创建一个专门用于显示累积区域的实体
-  const footprintEntity = viewer.entities.add({
-    name: "FootprintTotal",
-    show: showFootprint,
-    polygon: {
-      hierarchy: new Cesium.CallbackProperty(() => {
-        // 如果有累积区域，将其转换为 Cesium Hierarchy 返回
-        if (accumulatedGeoJSON) {
-          // 处理 MultiPolygon 和 Polygon
-          let positions = [];
+  // 更新 Footprint 实体的辅助函数
+  function updateFootprintVisuals() {
+    if (!accumulatedGeoJSON) return;
 
-          if (accumulatedGeoJSON.geometry.type === 'Polygon') {
-            const coords = accumulatedGeoJSON.geometry.coordinates[0];
-            positions = coords.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
-          } else if (accumulatedGeoJSON.geometry.type === 'MultiPolygon') {
-            // 如果产生 MultiPolygon（分离区域），取面积最大的多边形以保证显示主体
-            // 这是一个折衷方案，因为 Cesium 单个实体不支持 MultiPolygon
-            let maxArea = -1;
-            let maxCoords = null;
+    const polygons = accumulatedGeoJSON.geometry.type === 'Polygon'
+      ? [accumulatedGeoJSON.geometry.coordinates]
+      : accumulatedGeoJSON.geometry.coordinates;
 
-            const polygons = accumulatedGeoJSON.geometry.coordinates;
-            polygons.forEach(polyCoords => {
-              const polyFeature = turf.polygon(polyCoords);
-              const area = turf.area(polyFeature);
-              if (area > maxArea) {
-                maxArea = area;
-                maxCoords = polyCoords[0]; // 取外环
-              }
-            });
-
-            if (maxCoords) {
-              positions = maxCoords.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
-            }
-          }
-
-          return new Cesium.PolygonHierarchy(positions);
+    // 确保池大小足够
+    while (footprintEntityPool.length < polygons.length) {
+      const ent = viewer.entities.add({
+        name: "FootprintPart",
+        show: showFootprint,
+        polygon: {
+          hierarchy: new Cesium.PolygonHierarchy([]), // 初始为空
+          material: Cesium.Color.YELLOW.withAlpha(0.5),
+          zIndex: 1, // 确保在地面圆之上
+          classificationType: Cesium.ClassificationType.BOTH
         }
-        return new Cesium.PolygonHierarchy([]);
-      }, false),
-      material: Cesium.Color.YELLOW.withAlpha(0.5), // 调整为与高亮区域一致的透明度
-      zIndex: 1, // 确保在地面圆之上
-      classificationType: Cesium.ClassificationType.BOTH
+      });
+      footprintEntityPool.push(ent);
     }
-  });
+
+    // 更新每个实体
+    polygons.forEach((coords, index) => {
+      const ent = footprintEntityPool[index];
+
+      // 验证外环点数：至少需要 4 个点 (A, B, C, A) 才能构成一个封闭多边形
+      // GeoJSON 规范要求 LinearRing 至少有 4 个位置
+      if (!coords[0] || coords[0].length < 4) {
+        ent.show = false;
+        return;
+      }
+
+      ent.show = showFootprint;
+
+      // 转换坐标: coords[0] 是外环，coords[1...] 是内环（孔）
+      const exterior = coords[0].map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1]));
+      const holes = coords.slice(1).map(hole =>
+        new Cesium.PolygonHierarchy(hole.map(c => Cesium.Cartesian3.fromDegrees(c[0], c[1])))
+      );
+
+      ent.polygon.hierarchy = new Cesium.ConstantProperty(new Cesium.PolygonHierarchy(exterior, holes));
+    });
+
+    // 隐藏多余的实体
+    for (let i = polygons.length; i < footprintEntityPool.length; i++) {
+      footprintEntityPool[i].show = false;
+    }
+  }
 
   // 为每个圆锥实体创建对应的 Highlight 实体
   const highlightEntities = coneEntities.map(coneEntity => {
@@ -95,15 +102,46 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntitiesInpu
             if (val !== undefined) coneLength = val;
           }
 
-          // 1. 计算圆锥主轴向量（从圆锥中心指向地面目标）
-          const axis = Cesium.Cartesian3.subtract(groundPos, conePos, new Cesium.Cartesian3());
-          Cesium.Cartesian3.normalize(axis, axis);
-
-          // 修正：计算圆锥顶点 (Apex) 位置
-          // 圆锥实体位置是几何中心，顶点位于中心沿反向主轴偏移 length/2 处
+          // 获取圆锥顶点 (Apex) 位置
           const apexPos = new Cesium.Cartesian3();
-          Cesium.Cartesian3.multiplyByScalar(axis, -coneLength / 2, apexPos);
-          Cesium.Cartesian3.add(conePos, apexPos, apexPos);
+          if (coneEntity.vertexPosition) {
+            // 如果实体存储了顶点位置，直接获取
+            const val = typeof coneEntity.vertexPosition.getValue === 'function'
+              ? coneEntity.vertexPosition.getValue(time)
+              : coneEntity.vertexPosition;
+            Cesium.Cartesian3.clone(val, apexPos);
+          } else {
+            // 降级方案：从中心点计算（注意：这在中心点低于地面时可能失效）
+            const axisFromCenter = Cesium.Cartesian3.subtract(groundPos, conePos, new Cesium.Cartesian3());
+            Cesium.Cartesian3.normalize(axisFromCenter, axisFromCenter);
+            Cesium.Cartesian3.multiplyByScalar(axisFromCenter, -coneLength / 2, apexPos);
+            Cesium.Cartesian3.add(conePos, apexPos, apexPos);
+          }
+
+          // 1. 计算圆锥主轴向量（从圆锥顶点指向地面目标）
+          // 修正：从实体 orientation 属性获取真实方向，而不是假设指向 groundPos
+          let axis = new Cesium.Cartesian3();
+
+          if (coneEntity.orientation) {
+            const orientation = coneEntity.orientation.getValue(time);
+            if (orientation) {
+              // 在 createTargetingCone 中，圆锥的局部 Z 轴指向 Tip（因为中心点是计算出来的）
+              // 或者更准确地说，Cylinder Geometry 默认 Z 轴是高度方向。
+              // 我们之前设定：从 Target 指向 Position (Tip) 是 Z 轴。
+              // 所以从 Tip 指向 Target (即 "光束" 方向) 是局部 -Z 轴 (0, 0, -1)。
+              const localDirection = new Cesium.Cartesian3(0, 0, -1);
+              const rotationMatrix = Cesium.Matrix3.fromQuaternion(orientation);
+              Cesium.Matrix3.multiplyByVector(rotationMatrix, localDirection, axis);
+            } else {
+              // Fallback
+              Cesium.Cartesian3.subtract(groundPos, apexPos, axis);
+            }
+          } else {
+            // Fallback
+            Cesium.Cartesian3.subtract(groundPos, apexPos, axis);
+          }
+
+          Cesium.Cartesian3.normalize(axis, axis);
 
           // 2. 构建局部坐标系 (tangent, bitangent, axis)
           const tangent = new Cesium.Cartesian3();
@@ -186,23 +224,27 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntitiesInpu
                 const c = Cesium.Cartographic.fromCartesian(p);
                 return [Cesium.Math.toDegrees(c.longitude), Cesium.Math.toDegrees(c.latitude)];
               });
+
               // 闭合
-              if (coordinates.length > 0) {
+              if (coordinates.length >= 3) {
                 coordinates.push(coordinates[0]);
 
-                const currentPoly = turf.polygon([coordinates]);
+                try {
+                  const currentPoly = turf.polygon([coordinates]);
 
-                // 2. 合并
-                if (!accumulatedGeoJSON) {
-                  accumulatedGeoJSON = currentPoly;
-                } else {
-                  try {
+                  // 2. 合并
+                  if (!accumulatedGeoJSON) {
+                    accumulatedGeoJSON = currentPoly;
+                  } else {
                     accumulatedGeoJSON = turf.union(turf.featureCollection([accumulatedGeoJSON, currentPoly]));
                     // 简化以提高性能
                     accumulatedGeoJSON = turf.simplify(accumulatedGeoJSON, { tolerance: 0.0001, highQuality: false });
-                  } catch (e) {
-                    console.error("Turf union failed:", e);
                   }
+
+                  updateFootprintVisuals();
+                } catch (e) {
+                  // 忽略无效多边形构建错误
+                  console.warn("Polygon construction failed:", e);
                 }
               }
 
@@ -224,6 +266,6 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntitiesInpu
 
   return {
     highlightEntities, // 返回数组
-    footprintEntity,
+    footprintEntities: footprintEntityPool,
   }
 }

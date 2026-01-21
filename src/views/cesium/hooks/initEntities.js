@@ -24,8 +24,37 @@ export function castToCartesian3(viewer, enableAnimation = false) {
 
   // 3. 创建可移动的圆锥实体
   const startTime = Cesium.JulianDate.now();
-  const positionProperty1 = setupConeAnimation(centerLon, centerLat, enableAnimation, startTime);
-  const positionProperty2 = setupConeAnimation(centerLon + 0.05, centerLat, enableAnimation, startTime);
+
+  // 生成5个圆锥，并在不同位置和方向移动
+  const coneEntities = [];
+  const colors = [Cesium.Color.RED, Cesium.Color.BLUE, Cesium.Color.GREEN, Cesium.Color.YELLOW, Cesium.Color.PURPLE];
+
+  for (let i = 0; i < 5; i++) {
+    // 偏移起始位置，让它们散开
+    const offsetLon = (i - 2) * 0.1;
+    const offsetLat = (i % 2 === 0 ? 0.1 : -0.1) * (i + 1) * 0.5;
+
+    // 生成不同的动画路径
+    const positionProperty = setupConeAnimation(
+      centerLon + offsetLon,
+      centerLat + offsetLat,
+      enableAnimation,
+      startTime,
+      i // 传入索引以产生差异化路径
+    );
+
+    const coneEntity = createTargetingCone(viewer, {
+      name: `Cone${i + 1}`,
+      position: positionProperty,
+      orientation: Cesium.Quaternion.IDENTITY,
+      targetPosition: targetPosition || null,
+      length: coneHeight,
+      coneAngle: coneAngle,
+      color: colors[i % colors.length].withAlpha(0.4)
+    });
+
+    coneEntities.push(coneEntity);
+  }
 
   // 设置时钟范围以播放动画
   if (enableAnimation) {
@@ -37,30 +66,6 @@ export function castToCartesian3(viewer, enableAnimation = false) {
     viewer.clock.multiplier = 1;
     viewer.clock.shouldAnimate = true;
   }
-
-  const coneEntity1 = createTargetingCone(viewer, {
-    name: "Cone1",
-    position: positionProperty1,
-    targetPosition: targetPosition || null,
-    orientation: Cesium.Quaternion.IDENTITY,
-    length: coneHeight,
-    coneAngle: coneAngle,
-    modelUrl: "/src/assets/models/uav.glb",
-    color: Cesium.Color.RED.withAlpha(0.4)
-  });
-
-  const coneEntity2 = createTargetingCone(viewer, {
-    name: "Cone2",
-    position: positionProperty2,
-    targetPosition: targetPosition || null,
-    orientation: Cesium.Quaternion.IDENTITY,
-    length: coneHeight,
-    coneAngle: coneAngle,
-    modelUrl: "/src/assets/models/uav.glb",
-    color: Cesium.Color.BLUE.withAlpha(0.4) // 区分颜色
-  });
-
-  const coneEntities = [coneEntity1, coneEntity2];
 
   // 4. 计算圆锥底面与地面圆形的交集，生成高亮区域
   if (targetPosition) {
@@ -81,28 +86,33 @@ export function castToCartesian3(viewer, enableAnimation = false) {
  * @param {number} centerLat 中心纬度
  * @param {boolean} enable 是否启用动画
  * @param {Cesium.JulianDate} startTime 动画开始时间
+ * @param {number} index 索引，用于生成差异化路径
  * @returns {Cesium.Property} 位置属性
  */
-function setupConeAnimation(centerLon, centerLat, enable, startTime) {
-  const height = 4000;
+function setupConeAnimation(centerLon, centerLat, enable, startTime, index = 0) {
+  const height = 20000;
 
   // 如果不启用动画，返回起始位置的固定坐标
   if (!enable) {
     return Cesium.Cartesian3.fromDegrees(centerLon - 0.05, centerLat - 0.05, height);
   }
 
+  // 基础偏移量，根据索引调整方向
+  const dirX = (index % 2 === 0) ? 1 : -1;
+  const dirY = (index % 3 === 0) ? 1 : -1;
+
   // 定义移动路径坐标列表（每隔一秒变换位置）
   const waypoints = [
-    { lon: centerLon - 0.05, lat: centerLat - 0.05, height: height },
-    { lon: centerLon - 0.03, lat: centerLat - 0.03, height: height },
-    { lon: centerLon - 0.01, lat: centerLat - 0.01, height: height },
-    { lon: centerLon + 0.01, lat: centerLat + 0.01, height: height },
-    { lon: centerLon + 0.03, lat: centerLat + 0.03, height: height },
-    { lon: centerLon + 0.05, lat: centerLat + 0.05, height: height },
-    { lon: centerLon + 0.05, lat: centerLat + 0.02, height: height },
-    { lon: centerLon + 0.03, lat: centerLat, height: height },
-    { lon: centerLon + 0.01, lat: centerLat - 0.02, height: height },
-    { lon: centerLon - 0.02, lat: centerLat - 0.04, height: height },
+    { lon: centerLon, lat: centerLat, height: height },
+    { lon: centerLon + 0.02 * dirX, lat: centerLat + 0.02 * dirY, height: height },
+    { lon: centerLon + 0.04 * dirX, lat: centerLat + 0.04 * dirY, height: height },
+    { lon: centerLon + 0.06 * dirX, lat: centerLat - 0.02 * dirY, height: height },
+    { lon: centerLon + 0.04 * dirX, lat: centerLat - 0.04 * dirY, height: height },
+    { lon: centerLon + 0.02 * dirX, lat: centerLat - 0.06 * dirY, height: height },
+    { lon: centerLon, lat: centerLat - 0.04 * dirY, height: height },
+    { lon: centerLon - 0.02 * dirX, lat: centerLat - 0.02 * dirY, height: height },
+    { lon: centerLon - 0.04 * dirX, lat: centerLat, height: height },
+    { lon: centerLon, lat: centerLat, height: height },
   ];
 
   const positionProperty = new Cesium.SampledPositionProperty();
