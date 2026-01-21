@@ -12,8 +12,8 @@ import { castToCartesian3 } from "./hooks/initEntities.js";
 const cesiumRef = useTemplateRef("cesiumContainer");
 const viewer = ref(null);
 
-onMounted(() => {
-  viewer.value = cesiumInit(cesiumRef.value);
+onMounted(async () => {
+  viewer.value = await cesiumInit(cesiumRef.value);
   castToCartesian3(viewer.value, true);
 });
 </script>

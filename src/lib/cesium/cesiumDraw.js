@@ -105,7 +105,7 @@ export function createTargetingCone(viewer, options) {
       topRadius: 0,
       bottomRadius: bottomRadius,
       material: color,
-      outline: true,
+      outline: false,
       outlineColor: color.withAlpha(1.0),
     },
   });
@@ -125,4 +125,37 @@ export function createTargetingCone(viewer, options) {
   }
 
   return entity;
+}
+
+/**
+ * 创建地面圆形实体
+ * @param {Cesium.Viewer} viewer 
+ * @param {Object} options 
+ * @param {number} options.longitude 经度
+ * @param {number} options.latitude 纬度
+ * @param {number} options.radius 半径(米)
+ * @param {Cesium.Color} [options.color] 填充颜色
+ * @param {Cesium.Color} [options.outlineColor] 边框颜色
+ * @returns {Cesium.Entity} 地面圆形实体
+ */
+export function createGroundCircle(viewer, options) {
+  const {
+    longitude,
+    latitude,
+    radius,
+    color = Cesium.Color.BLUE.withAlpha(0.2),
+    outlineColor = Cesium.Color.BLUE
+  } = options;
+
+  return viewer.entities.add({
+    name: "GroundCircle",
+    position: Cesium.Cartesian3.fromDegrees(longitude, latitude, 0),
+    ellipse: {
+      semiMajorAxis: radius,
+      semiMinorAxis: radius,
+      material: color,
+      outline: true,
+      outlineColor: outlineColor,
+    },
+  });
 }
