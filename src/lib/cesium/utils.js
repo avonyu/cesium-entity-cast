@@ -125,7 +125,7 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntitiesInpu
           if (coneEntity.orientation) {
             const orientation = coneEntity.orientation.getValue(time);
             if (orientation) {
-              // 在 createTargetingCone 中，圆锥的局部 Z 轴指向 Tip（因为中心点是计算出来的）
+              // 在 createCone 中，圆锥的局部 Z 轴指向 Tip（因为中心点是计算出来的）
               // 或者更准确地说，Cylinder Geometry 默认 Z 轴是高度方向。
               // 我们之前设定：从 Target 指向 Position (Tip) 是 Z 轴。
               // 所以从 Tip 指向 Target (即 "光束" 方向) 是局部 -Z 轴 (0, 0, -1)。
@@ -139,6 +139,11 @@ export function createIntersectionPolygon(viewer, groundEntity, coneEntitiesInpu
           } else {
             // Fallback
             Cesium.Cartesian3.subtract(groundPos, apexPos, axis);
+          }
+
+          // 检查 axis 是否为零向量 (apexPos 与 groundPos 重合时发生)
+          if (Cesium.Cartesian3.magnitudeSquared(axis) < Cesium.Math.EPSILON10) {
+            return new Cesium.PolygonHierarchy([]);
           }
 
           Cesium.Cartesian3.normalize(axis, axis);

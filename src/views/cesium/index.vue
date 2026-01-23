@@ -7,14 +7,14 @@
 <script setup>
 import { ref, onMounted, useTemplateRef } from "vue";
 import { cesiumInit } from "@/lib/cesium/cesiumInit.js";
-import { castToCartesian3 } from "./hooks/initEntities.js";
+import { scene } from "./hooks/initEntities.js";
 
 const cesiumRef = useTemplateRef("cesiumContainer");
 const viewer = ref(null);
 
 onMounted(async () => {
   viewer.value = await cesiumInit(cesiumRef.value);
-  castToCartesian3(viewer.value, true);
+  scene(viewer.value);
 });
 </script>
 
