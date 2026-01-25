@@ -1,4 +1,4 @@
-import * as Cesium from 'cesium'
+import * as Cesium from "cesium";
 
 /**
  * 创建一个指向地面上目标点的圆锥模型，要求：
@@ -8,8 +8,8 @@ import * as Cesium from 'cesium'
  * 4. 若targetPosition不为null，则根据position和targetPosition计算orientation
  * 5. 已创建的实体若传入targetPosition，会自动更新orientation
  * 6. 若isTargetOrientation为true，则根据targetPosition计算orientation
- * @param {Cesium.Viewer} viewer 
- * @param {Object} options 
+ * @param {Cesium.Viewer} viewer
+ * @param {Object} options
  * @param {String} [options.id] 实体ID
  * @param {Cesium.Cartesian3} options.position 圆锥顶点位置 (尖端)
  * @param {Number} options.length 圆锥长度
@@ -31,7 +31,7 @@ export function createCone(viewer, options) {
     targetPosition = null,
     isTargetOrientation = false,
     color = Cesium.Color.RED.withAlpha(0.5),
-    name = "cone"
+    name = "cone",
   } = options;
 
   // 1. Create the Tip Entity (the handle returned to the user)
@@ -42,16 +42,16 @@ export function createCone(viewer, options) {
   });
 
   // Custom properties for internal logic
-  tipEntity.addProperty('targetPosition');
+  tipEntity.addProperty("targetPosition");
   tipEntity.targetPosition = targetPosition;
 
-  tipEntity.addProperty('isTargetOrientation');
+  tipEntity.addProperty("isTargetOrientation");
   tipEntity.isTargetOrientation = isTargetOrientation;
 
-  tipEntity.addProperty('coneLength');
+  tipEntity.addProperty("coneLength");
   tipEntity.coneLength = length;
 
-  tipEntity.addProperty('coneAngle');
+  tipEntity.addProperty("coneAngle");
   tipEntity.coneAngle = coneAngle;
 
   // Internal storage for manual orientation (fallback)
@@ -62,26 +62,51 @@ export function createCone(viewer, options) {
   // This ensures that even if the user sets .orientation, our logic (targetPosition priority) remains active.
   const masterOrientation = new Cesium.CallbackProperty((time) => {
     // Check if we should use target orientation
-    const useTarget = tipEntity.isTargetOrientation instanceof Cesium.Property
-      ? tipEntity.isTargetOrientation.getValue(time)
-      : tipEntity.isTargetOrientation;
+    const useTarget =
+      tipEntity.isTargetOrientation instanceof Cesium.Property
+        ? tipEntity.isTargetOrientation.getValue(time)
+        : tipEntity.isTargetOrientation;
 
-    const currentPos = tipEntity.position ? tipEntity.position.getValue(time) : undefined;
-    const currentTarget = tipEntity.targetPosition instanceof Cesium.Property
-      ? tipEntity.targetPosition.getValue(time)
-      : tipEntity.targetPosition;
+    const currentPos = tipEntity.position
+      ? tipEntity.position.getValue(time)
+      : undefined;
+    const currentTarget =
+      tipEntity.targetPosition instanceof Cesium.Property
+        ? tipEntity.targetPosition.getValue(time)
+        : tipEntity.targetPosition;
 
     // Condition: useTarget is true AND we have both positions
     if (useTarget && currentPos && currentTarget) {
       // Vector from Target to Tip (align +Z with this to point tip at Pos)
-      const direction = Cesium.Cartesian3.subtract(currentPos, currentTarget, new Cesium.Cartesian3());
+      const direction = Cesium.Cartesian3.subtract(
+        currentPos,
+        currentTarget,
+        new Cesium.Cartesian3(),
+      );
+
+      // Safety check: Avoid normalizing zero vector
+      if (
+        Cesium.Cartesian3.magnitudeSquared(direction) < Cesium.Math.EPSILON10
+      ) {
+        return _manualOrientation instanceof Cesium.Property
+          ? _manualOrientation.getValue(time)
+          : _manualOrientation;
+      }
+
       Cesium.Cartesian3.normalize(direction, direction);
 
       // Calculate Up vector (approximate)
-      const up = Cesium.Cartesian3.normalize(currentPos, new Cesium.Cartesian3());
+      const up = Cesium.Cartesian3.normalize(
+        currentPos,
+        new Cesium.Cartesian3(),
+      );
 
       // Calculate Right vector
-      const right = Cesium.Cartesian3.cross(up, direction, new Cesium.Cartesian3());
+      const right = Cesium.Cartesian3.cross(
+        up,
+        direction,
+        new Cesium.Cartesian3(),
+      );
       if (Cesium.Cartesian3.magnitudeSquared(right) < Cesium.Math.EPSILON10) {
         // Degenerate case (direction parallel to up), pick arbitrary axis
         Cesium.Cartesian3.cross(Cesium.Cartesian3.UNIT_X, direction, right);
@@ -89,33 +114,50 @@ export function createCone(viewer, options) {
       Cesium.Cartesian3.normalize(right, right);
 
       // Recalculate Up
-      const realUp = Cesium.Cartesian3.cross(direction, right, new Cesium.Cartesian3());
+      const realUp = Cesium.Cartesian3.cross(
+        direction,
+        right,
+        new Cesium.Cartesian3(),
+      );
       Cesium.Cartesian3.normalize(realUp, realUp);
 
       // Rotation Matrix [Right, RealUp, Direction]
       const rotationMatrix = new Cesium.Matrix3(
-        right.x, realUp.x, direction.x,
-        right.y, realUp.y, direction.y,
-        right.z, realUp.z, direction.z
+        right.x,
+        realUp.x,
+        direction.x,
+        right.y,
+        realUp.y,
+        direction.y,
+        right.z,
+        realUp.z,
+        direction.z,
       );
 
       return Cesium.Quaternion.fromRotationMatrix(rotationMatrix);
     }
 
     // Fallback to manual orientation
-    return _manualOrientation instanceof Cesium.Property
-      ? _manualOrientation.getValue(time)
-      : _manualOrientation;
+    const result =
+      _manualOrientation instanceof Cesium.Property
+        ? _manualOrientation.getValue(time)
+        : _manualOrientation;
+
+    // Safety check: Filter out invalid quaternions (NaN)
+    if (result && isNaN(result.x)) {
+      return undefined;
+    }
+    return result;
   }, false);
 
   // Override the orientation property on the instance
-  Object.defineProperty(tipEntity, 'orientation', {
+  Object.defineProperty(tipEntity, "orientation", {
     get: () => masterOrientation,
     set: (value) => {
       _manualOrientation = value;
     },
     configurable: true,
-    enumerable: true
+    enumerable: true,
   });
 
   // 3. Create the Visual Entity (Internal)
@@ -129,12 +171,19 @@ export function createCone(viewer, options) {
       }, false),
       topRadius: 0.0,
       bottomRadius: new Cesium.CallbackProperty((time) => {
-        const l = tipEntity.coneLength instanceof Cesium.Property ? tipEntity.coneLength.getValue(time) : tipEntity.coneLength;
-        const a = tipEntity.coneAngle instanceof Cesium.Property ? tipEntity.coneAngle.getValue(time) : tipEntity.coneAngle;
+        const l =
+          tipEntity.coneLength instanceof Cesium.Property
+            ? tipEntity.coneLength.getValue(time)
+            : tipEntity.coneLength;
+        const a =
+          tipEntity.coneAngle instanceof Cesium.Property
+            ? tipEntity.coneAngle.getValue(time)
+            : tipEntity.coneAngle;
         return l * Math.tan(a / 2);
       }, false),
       material: color,
-    }
+      outline: true,
+    },
   });
 
   // 4. Bind Visual Position
@@ -147,18 +196,46 @@ export function createCone(viewer, options) {
 
     const pos = tipEntity.position.getValue(time);
     const orient = tipEntity.orientation.getValue(time);
-    const len = tipEntity.coneLength instanceof Cesium.Property ? tipEntity.coneLength.getValue(time) : tipEntity.coneLength;
+    const len =
+      tipEntity.coneLength instanceof Cesium.Property
+        ? tipEntity.coneLength.getValue(time)
+        : tipEntity.coneLength;
 
-    if (pos && orient && len) {
+    if (pos && len) {
       // Tip is at +Z (L/2). Base is at -Z (-L/2).
       // We want Tip to be at `pos`.
       // Center = Tip - Rotation * (0, 0, L/2)
 
-      const offsetLocal = new Cesium.Cartesian3(0, 0, len / 2);
-      const rotMatrix = Cesium.Matrix3.fromQuaternion(orient, new Cesium.Matrix3());
-      const offsetWorld = Cesium.Matrix3.multiplyByVector(rotMatrix, offsetLocal, new Cesium.Cartesian3());
+      let effectiveOrient = orient;
+      if (!effectiveOrient) {
+        // Fallback: assume upright orientation (Z-up) based on position
+        const transform = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+        const rotation = Cesium.Matrix4.getMatrix3(
+          transform,
+          new Cesium.Matrix3(),
+        );
+        effectiveOrient = Cesium.Quaternion.fromRotationMatrix(rotation);
+      }
 
-      return Cesium.Cartesian3.subtract(pos, offsetWorld, new Cesium.Cartesian3());
+      const offsetLocal = new Cesium.Cartesian3(0, 0, len / 2);
+      const rotMatrix = Cesium.Matrix3.fromQuaternion(
+        effectiveOrient,
+        new Cesium.Matrix3(),
+      );
+      const offsetWorld = Cesium.Matrix3.multiplyByVector(
+        rotMatrix,
+        offsetLocal,
+        new Cesium.Cartesian3(),
+      );
+
+      const result = Cesium.Cartesian3.subtract(
+        pos,
+        offsetWorld,
+        new Cesium.Cartesian3(),
+      );
+      // Safety check: Avoid NaNs
+      if (isNaN(result.x)) return pos;
+      return result;
     }
     return pos;
   }, false);
@@ -174,8 +251,8 @@ export function createCone(viewer, options) {
 
 /**
  * 创建地面圆形实体
- * @param {Cesium.Viewer} viewer 
- * @param {Object} options 
+ * @param {Cesium.Viewer} viewer
+ * @param {Object} options
  * @param {number} options.longitude 经度
  * @param {number} options.latitude 纬度
  * @param {number} options.radius 半径(米)
@@ -190,7 +267,7 @@ export function createGroundCircle(viewer, options) {
     latitude,
     radius,
     color = Cesium.Color.BLUE.withAlpha(0.2),
-    outlineColor = Cesium.Color.BLUE
+    outlineColor = Cesium.Color.BLUE,
   } = options;
 
   return viewer.entities.add({

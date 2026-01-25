@@ -21,7 +21,7 @@ export async function cesiumInit(cesiumRef) {
   });
 
   // 开启深度测试，确保模型在地形上
-  // viewer.scene.globe.depthTestAgainstTerrain = true;
+  viewer.scene.globe.depthTestAgainstTerrain = true;
 
   return viewer;
 }
